@@ -1,0 +1,37 @@
+{
+  "name": "jerkai-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local read-only MCP server exposing JerkAI's biometric metric registry over stdio.",
+  "bin": {
+    "jerkai-mcp": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke-stdio.mjs",
+    "vendor:check": "node scripts/check-vendor-drift.mjs",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.18.13",
+    "eslint": "^9.39.1",
+    "husky": "^9.1.7",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

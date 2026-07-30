@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    // tsup/esbuild bundles everything into dist/server.js, so bundler-style
+    // resolution is what actually happens at build time. It also lets the
+    // vendored extensionless import below resolve without rewriting the file.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    // The vendored registry keeps its upstream import specifier byte-for-byte,
+    // so `@/lib/dashboard/*` has to resolve to the local vendor copies.
+    "paths": {
+      "@/lib/dashboard/*": ["./src/vendor/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "*.ts"],
+  "exclude": ["dist", "node_modules"]
+}
