@@ -1,0 +1,11 @@
+{
+  "repo": "albimartai/jerkai",
+  "remote": "https://github.com/albimartai/jerkai.git",
+  "sha": "26b3d069ab17f84e682dea074f8f4ecb12b3c2ef",
+  "branch": "main",
+  "headerLines": 4,
+  "files": {
+    "src/vendor/types.ts": "lib/dashboard/types.ts",
+    "src/vendor/strain.ts": "lib/dashboard/strain.ts"
+  }
+}

@@ -1,0 +1,270 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import ts from "typescript";
+import { describe, expect, it } from "vitest";
+
+import { DOMAIN_KEY_WHITELIST, DomainKeyViolationError, assertDomainKeys } from "../../src/schema-guards.js";
+import {
+  InputSchema,
+  MetricEntrySchema,
+  OutputSchema,
+  buildResult,
+} from "../../src/tools/list-available-metrics.js";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const srcDir = join(repoRoot, "src");
+
+const DB_PACKAGES = [
+  "pg",
+  "@neondatabase/serverless",
+  "drizzle-orm",
+  "prisma",
+  "@prisma/client",
+  "better-sqlite3",
+  "sqlite3",
+  "mysql2",
+  "knex",
+  "typeorm",
+];
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+    .map((entry) => join(entry.parentPath, entry.name));
+}
+
+function parse(path: string): ts.SourceFile {
+  return ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+}
+
+function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
+  visit(node);
+  node.forEachChild((child) => walk(child, visit));
+}
+
+const ALL_SRC_FILES = sourceFiles(srcDir);
+const rel = (path: string) => path.slice(repoRoot.length + 1);
+
+describe("AC-MF1b-1: no database packages in package.json", () => {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  const declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+
+  it("declares at least one dependency (so this guard is not vacuous)", () => {
+    expect(declared.length).toBeGreaterThan(0);
+  });
+
+  it.each(DB_PACKAGES)("does not depend on %s", (name) => {
+    expect(declared).not.toContain(name);
+  });
+});
+
+describe("AC-MF1b-2: no database driver imports under src/", () => {
+  it("finds source files to inspect", () => {
+    expect(ALL_SRC_FILES.length).toBeGreaterThan(0);
+  });
+
+  it("has no db/ORM import or require anywhere under src/", () => {
+    const offences: string[] = [];
+
+    for (const path of ALL_SRC_FILES) {
+      walk(parse(path), (node) => {
+        let specifier: string | undefined;
+
+        if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+          specifier = node.moduleSpecifier.text;
+        } else if (
+          ts.isCallExpression(node) &&
+          (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+            (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+          node.arguments[0] &&
+          ts.isStringLiteral(node.arguments[0])
+        ) {
+          specifier = (node.arguments[0] as ts.StringLiteral).text;
+        }
+
+        if (specifier === undefined) return;
+        const root = specifier.startsWith("@")
+          ? specifier.split("/").slice(0, 2).join("/")
+          : specifier.split("/")[0];
+        if (root && DB_PACKAGES.includes(root)) offences.push(`${rel(path)}: ${specifier}`);
+      });
+    }
+
+    expect(offences).toEqual([]);
+  });
+});
+
+describe("AC-MF1b-3: no stdout writes under src/", () => {
+  it("has no console.log or process.stdout.write call", () => {
+    const offences: string[] = [];
+
+    for (const path of ALL_SRC_FILES) {
+      const source = parse(path);
+      walk(source, (node) => {
+        if (!ts.isCallExpression(node)) return;
+        const callee = node.expression.getText(source).replace(/\s+/g, "");
+        if (
+          callee === "console.log" ||
+          callee === "process.stdout.write" ||
+          callee.endsWith(".stdout.write")
+        ) {
+          const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+          offences.push(`${rel(path)}:${line + 1}: ${callee}`);
+        }
+      });
+    }
+
+    expect(offences).toEqual([]);
+  });
+});
+
+describe("AC-MF1b-4: no static metric payloads in the registry path", () => {
+  const inspected = ALL_SRC_FILES.filter(
+    (path) => path.startsWith(join(srcDir, "tools")) || path === join(srcDir, "config.ts"),
+  );
+
+  it("inspects both the tools directory and config.ts", () => {
+    expect(inspected.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("declares no object literal carrying a metric name", () => {
+    const offences: string[] = [];
+
+    for (const path of inspected) {
+      const source = parse(path);
+      walk(source, (node) => {
+        if (!ts.isObjectLiteralExpression(node)) return;
+        const named = node.properties
+          .filter(ts.isPropertyAssignment)
+          .filter((property) => {
+            const name = property.name.getText(source).replace(/["']/g, "");
+            return name === "source" || name === "metric";
+          })
+          // A hardcoded payload is one that pins a *literal* value; `metric:
+          // definition.metric` is the dynamic derivation we want.
+          .filter((property) => ts.isStringLiteral(property.initializer));
+
+        if (named.length > 0) {
+          const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+          offences.push(`${rel(path)}:${line + 1}: ${node.getText(source).slice(0, 80)}`);
+        }
+      });
+    }
+
+    expect(offences).toEqual([]);
+  });
+});
+
+describe("DoD 5: no hardcoded unit values or SQL under src/", () => {
+  const UNIT_LITERALS = new Set(["kg", "lb", "lbs", "%", "bpm", "ms", "hr", "kcal"]);
+
+  it("has no bare measurement-unit string literal outside the vendored files", () => {
+    const offences: string[] = [];
+
+    for (const path of ALL_SRC_FILES) {
+      if (path.startsWith(join(srcDir, "vendor"))) continue;
+      const source = parse(path);
+      walk(source, (node) => {
+        if (ts.isStringLiteral(node) && UNIT_LITERALS.has(node.text)) {
+          offences.push(`${rel(path)}: "${node.text}"`);
+        }
+      });
+    }
+
+    expect(offences).toEqual([]);
+  });
+
+  it("has no SQL query strings", () => {
+    const sql = /\b(select\s+.+\s+from|insert\s+into|update\s+\w+\s+set|delete\s+from)\b/i;
+    const offences = ALL_SRC_FILES.filter((path) => sql.test(readFileSync(path, "utf8"))).map(rel);
+    expect(offences).toEqual([]);
+  });
+});
+
+describe("AC-MF1c-1: closed input schema", () => {
+  it("is declared strict", () => {
+    expect(InputSchema._def.unknownKeys).toBe("strict");
+  });
+
+  it("rejects any property", () => {
+    expect(InputSchema.safeParse({}).success).toBe(true);
+    expect(InputSchema.safeParse({ unexpected: true }).success).toBe(false);
+  });
+});
+
+describe("AC-MF1c-2: closed output schema, root and items", () => {
+  it("declares the root object strict", () => {
+    expect(OutputSchema._def.unknownKeys).toBe("strict");
+  });
+
+  it("declares the metric array item strict", () => {
+    expect(MetricEntrySchema._def.unknownKeys).toBe("strict");
+    expect(OutputSchema.shape.metrics.element._def.unknownKeys).toBe("strict");
+  });
+
+  it("rejects an extra root property", () => {
+    expect(OutputSchema.safeParse({ metrics: [], caveats: [], extra: 1 }).success).toBe(false);
+  });
+
+  it("rejects an extra metric-entry property", () => {
+    const [entry] = buildResult().metrics;
+    expect(MetricEntrySchema.safeParse(entry).success).toBe(true);
+    expect(MetricEntrySchema.safeParse({ ...entry, extra: 1 }).success).toBe(false);
+  });
+
+  it("rejects a non-null coverage field", () => {
+    const [entry] = buildResult().metrics;
+    expect(MetricEntrySchema.safeParse({ ...entry, dayCount: 0 }).success).toBe(false);
+  });
+});
+
+describe("AC-MF8: strict domain payload key whitelisting", () => {
+  it("accepts the real payload and visits keys while doing so", () => {
+    const visited = assertDomainKeys(buildResult());
+    expect(visited).toBeGreaterThan(0);
+  });
+
+  it("only ever visits whitelisted keys", () => {
+    const seen = new Set<string>();
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(collect);
+      if (typeof node !== "object" || node === null) return;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        seen.add(key);
+        collect(value);
+      }
+    };
+    collect(buildResult());
+
+    expect(seen.size).toBeGreaterThan(0);
+    for (const key of seen) {
+      expect(DOMAIN_KEY_WHITELIST).toContain(key);
+    }
+  });
+
+  it("throws on an unwhitelisted root property", () => {
+    expect(() => assertDomainKeys({ metrics: [], caveats: [], unexpectedKey: true })).toThrow(
+      DomainKeyViolationError,
+    );
+  });
+
+  it("throws on an unwhitelisted nested property", () => {
+    const payload = buildResult() as unknown as { metrics: Record<string, unknown>[] };
+    payload.metrics[0]!.smuggled = true;
+    expect(() => assertDomainKeys(payload)).toThrow(DomainKeyViolationError);
+  });
+
+  it("throws when the walk visits zero keys", () => {
+    expect(() => assertDomainKeys({})).toThrow(/zero keys/);
+    expect(() => assertDomainKeys(null)).toThrow(/zero keys/);
+    expect(() => assertDomainKeys([])).toThrow(/zero keys/);
+  });
+
+  it("rejects protocol envelope keys, which are not domain keys", () => {
+    expect(() => assertDomainKeys({ content: [], structuredContent: {} })).toThrow(
+      DomainKeyViolationError,
+    );
+  });
+});

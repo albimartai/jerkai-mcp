@@ -1,0 +1,40 @@
+name: Vendor drift
+
+# The vendored registry files are byte-pinned to a jerkai commit. This checks
+# them out alongside and compares. Runs on every change plus a weekly tick, so
+# an upstream registry change surfaces here rather than as a silently stale
+# metric list.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  vendor-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: jerkai-mcp
+
+      - name: Check out the upstream jerkai repo at full depth
+        uses: actions/checkout@v5
+        with:
+          repository: albimartai/jerkai
+          path: jerkai
+          fetch-depth: 0
+          # Needed only if albimartai/jerkai is private.
+          token: ${{ secrets.JERKAI_REPO_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Check vendored files against the locked commit
+        working-directory: jerkai-mcp
+        env:
+          JERKAI_REPO: ${{ github.workspace }}/jerkai
+        run: node scripts/check-vendor-drift.mjs
