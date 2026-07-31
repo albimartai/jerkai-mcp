@@ -23,18 +23,22 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 `<type>(<optional scope>): <description>`. Common types: `feat`, `fix`, `docs`, `test`,
 `refactor`, `chore`, `ci`, `perf`.
 
-**Convention, not enforced.** Unlike jerkai, this repo has **no commitlint dependency, no
-commitlint config and no `commit-msg` hook**. `.husky/` contains exactly one hook,
-`pre-commit`. A malformed commit message will be accepted here without complaint.
+**Enforced, not just convention.** As in jerkai, the format is checked locally:
+`commitlint.config.mjs` extends `@commitlint/config-conventional`, and the
+`.husky/commit-msg` hook runs `npx --no -- commitlint --edit "$1"` on every commit.
+`npm install` wires both up, via husky and the `@commitlint/cli` and
+`@commitlint/config-conventional` devDependencies (`^21.2.1` and `^21.2.0`). A malformed
+commit message is rejected with a non-zero exit and the commit does not land.
 
 ## Git hooks
 
-`npm install` installs the husky hooks (`package.json` → `"prepare": "husky"`). There is
-one:
+`npm install` installs the husky hooks (`package.json` → `"prepare": "husky"`). There are
+two:
 
 | Hook | What it runs | What it does |
 |---|---|---|
 | `.husky/pre-commit` | `gitleaks git --pre-commit --staged --redact --verbose` | Scans staged changes for secrets and blocks the commit if any are found |
+| `.husky/commit-msg` | `npx --no -- commitlint --edit "$1"` | Checks the commit message against Conventional Commits and blocks the commit if it does not parse |
 
 The hook shells out to `gitleaks`, which is **not** an npm dependency and must be on your
 PATH (`brew install gitleaks`). Without it the hook fails and the commit is blocked, which
@@ -80,6 +84,10 @@ Two workflows, both in `.github/workflows/`:
   short version is that it catches local edits to `src/vendor/` and cannot detect upstream
   change.
 
-There are no issue or PR templates in this repo. A PR should still carry a summary, the
-testing done, and the DoD checklist from
-[docs/definition-of-ready-and-done.md](docs/definition-of-ready-and-done.md).
+This repo has a PR template (`.github/pull_request_template.md`) and two issue templates
+(`.github/ISSUE_TEMPLATE/feature.md`, which carries the DoR gate, and
+`.github/ISSUE_TEMPLATE/bug.md`). A PR still carries a summary, the linked issue, the
+testing done, and the baseline DoD checklist from
+[docs/definition-of-ready-and-done.md](docs/definition-of-ready-and-done.md) — the template
+now supplies that checklist rather than this prose, and references the standard rather than
+restating it. Strike any item that is genuinely n/a and say why.
