@@ -6,6 +6,22 @@
 
 ---
 
+## Post-ship correction — 2026-07-31
+
+One factual error in this PRD's description of the code, surfaced by the Session Prompt J build session (`jerkai-mcp@6799c01`) while authoring the repo's agent context. Recorded here rather than edited in place, so the shipped text stays readable as what the build was handed.
+
+**§4.1, step 3 — "Metric Extraction" — is wrong about the import graph.** It reads:
+
+> Handler imports `DASHBOARD_METRICS` from `src/config.ts` (which aggregates and re-exports metric definitions from both `src/vendor/types.ts` and `src/vendor/strain.ts`).
+
+`src/config.ts` imports from **`src/vendor/types.ts` only** — a single statement, `import { DASHBOARD_METRICS as VENDORED_METRICS } from "./vendor/types.js"`. It never imports `src/vendor/strain.ts`. Day Strain reaches the registry **indirectly**, because `types.ts` itself imports `DAY_STRAIN_METRIC` from `strain.ts` — an upstream edge inherited verbatim from `jerkai`'s `lib/dashboard/types.ts`, which is why it survives the byte-pin.
+
+**Nothing built is wrong.** The shipped behavior is correct and `AC-MF5a` (the response key set equals `Object.keys(DASHBOARD_METRICS)`) passes on the real single-import path. Only this sentence's account of *how* the registry is assembled is inaccurate. Both vendored files remain load-bearing, and both remain locked in `vendor.lock.json`.
+
+**Why it matters anyway.** A reader planning slice 1b would infer two independent vendor imports into `config.ts` and design around a structure that does not exist.
+
+---
+
 ## 0. Definition of Ready (DoR)
 
 Before initiating implementation of this slice, the following prerequisites must be met:
