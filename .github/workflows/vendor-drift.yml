@@ -1,9 +1,17 @@
 name: Vendor drift
 
 # The vendored registry files are byte-pinned to a jerkai commit. This checks
-# them out alongside and compares. Runs on every change plus a weekly tick, so
-# an upstream registry change surfaces here rather than as a silently stale
-# metric list.
+# them out alongside and compares each vendored copy, header stripped, against
+# `git show <locked-sha>:<path>` — the SHA in vendor.lock.json, not upstream
+# `main`.
+#
+# What that guarantees: nobody has edited src/vendor/, and no unlocked file has
+# appeared there. What it does not: the locked commit is immutable, so an
+# upstream change to lib/dashboard can never make this job fail. The weekly
+# schedule below re-runs the same comparison against the same frozen bytes and
+# can only ever return the same result. A stale metric registry stays green.
+# Picking up an upstream change is a deliberate step: re-copy both files, bump
+# `sha` in vendor.lock.json, re-run the check.
 on:
   push:
     branches: [main]

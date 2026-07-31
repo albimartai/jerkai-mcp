@@ -87,7 +87,13 @@ JERKAI_REPO=../jerkai node scripts/check-vendor-drift.mjs
 ```
 
 The check compares against a local jerkai checkout (`JERKAI_REPO`, default `../jerkai`),
-so it works offline. The `Vendor drift` workflow runs it weekly against upstream `main`.
+so it works offline. It resolves the upstream bytes with `git show <locked-sha>:<path>`,
+where the SHA is the one in `vendor.lock.json` — never the checkout's current `main`. So it
+catches edits to `src/vendor/` and nothing else: a change to `lib/dashboard` upstream leaves
+this repo green and serving a stale registry. Picking one up is the deliberate step above.
+The `Vendor drift` workflow runs the same comparison against the same frozen commit on every
+push, on every PR and on a weekly cron, so it does not — and as currently written cannot —
+alert on upstream drift.
 
 ## Scripts
 
