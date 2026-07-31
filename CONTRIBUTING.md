@@ -13,9 +13,21 @@ than jerkai's, and the differences are called out where they exist.
 - The branch-from-fresh-main sequence is not optional and is written out in
   [docs/definition-of-ready-and-done.md](docs/definition-of-ready-and-done.md) §1.
 
-**Convention, not enforced.** The repository is private, so GitHub branch protection is
-unavailable on the current plan — nothing mechanically blocks a direct push to `main` or a
-merge with red CI. The rule holds because sessions follow it, not because a server refuses.
+**Where enforcement is defined.** Branch rules here come from repository rulesets, not from
+classic branch protection. Rulesets are mutable server-side state, so what governs `main` is
+read from GitHub, never transcribed into this file. One endpoint answers it:
+
+```bash
+gh api repos/albimartai/jerkai-mcp/rules/branches/main
+```
+
+That returns the rules in force on `main`, each tagged with the `ruleset_id` it came from.
+An empty array means nothing governs `main`. Ask this endpoint rather than the ruleset list:
+a ruleset can read `"enforcement": "active"`, carry correct rules and still apply to no
+branch at all, in which case it enforces nothing. Existing and applying are separate
+questions, and only this one answers the second.
+
+In the UI: repo → Settings → Rules.
 
 ## Commits — Conventional Commits
 
@@ -53,6 +65,25 @@ this repo is designed never to hold — see [AGENTS.md](AGENTS.md).
 Never commit a secret of any kind. `.env.example` is the only env file in the repo and
 carries no value beyond `JERKAI_REPO`, a local path. There is no `DATABASE_URL` here, and
 adding one is a scope change, not a config change.
+
+Two halves guard this, and both are in force: the local gitleaks `pre-commit` hook above,
+and GitHub's own secret scanning with push protection, which runs server-side on the
+receiving end. Read the server-side half rather than trusting this paragraph:
+
+```bash
+gh api repos/albimartai/jerkai-mcp --jq '.security_and_analysis'
+```
+
+The server-side half matters independently of the hook, not as a duplicate of it. A single
+`git commit --no-verify` bypasses the hook, and the hook does not exist at all on a machine
+where it was never installed. Push protection holds in both cases, because it runs where
+the push lands rather than where it was made.
+
+Scanning for non-provider patterns is not available to this repo: it requires GitHub Secret
+Protection on an organization-owned repository with Team or Enterprise Cloud, and this repo
+is owned by a personal account. That is why `.gitleaks.toml` carries its own Postgres/Neon
+connection-string rule locally, covering the one credential this repo is designed never to
+hold and which no provider pattern would recognize.
 
 ## Scripts
 
