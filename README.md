@@ -4,9 +4,9 @@ A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) ser
 tells a model which JerkAI biometric axes exist, where they come from, and what this
 server cannot answer.
 
-Slice 1 exposes exactly one tool, `list_available_metrics`. It touches no database, holds
-no credentials, and reports no values. Every coverage field comes back `null` on purpose:
-the shape is final, the data is not wired up yet.
+It exposes two tools, `list_available_metrics` and `describe_metric`. Neither touches a
+database, holds credentials, or reports a real reading. Every coverage field comes back
+`null` on purpose: the shape is final, the data is not wired up yet.
 
 ## Quick start
 
@@ -30,10 +30,12 @@ all diagnostics go to `stderr`.
 }
 ```
 
-## The tool
+## The tools
 
-`list_available_metrics` takes no arguments (the input schema is closed: any property is
-a validation error) and returns:
+### `list_available_metrics`
+
+Takes no arguments (the input schema is closed: any property is a validation error) and
+returns:
 
 ```json
 {
@@ -63,7 +65,41 @@ proprietary composites (`recovery_score`, `day_strain`) get named as such when p
 Every caveat is emitted twice, once in `structuredContent` and once verbatim in the text
 content blocks, so a client that ignores structured output still sees them.
 
-## What this slice is not
+### `describe_metric`
+
+Takes one required argument, `key` (a key from `list_available_metrics`'s response), and
+returns that axis's role in the driver tree, whether it is measured or vendor-computed, and
+what it cannot tell you:
+
+```json
+{
+  "source": "whoop",
+  "metric": "recovery_score",
+  "role": "guardrail",
+  "measurement": "vendor_computed",
+  "description": "Whoop's Recovery Score: a guardrail metric summarizing how ready the body is to take on strain.",
+  "limitations": [
+    "recovery_score is Whoop's proprietary Recovery Score, a vendor-computed composite rather than a directly measured quantity. Its inputs and scale are Whoop's own and are not reproducible from the other metrics here."
+  ],
+  "caveats": ["..."]
+}
+```
+
+`role` is one of `north_star`, `driver`, `guardrail` or `tracked` — `tracked` means the
+metric is ingested and shown but deliberately outside the driver tree (`weight` and
+`sleepDuration` today). `measurement` is `measured` or `vendor_computed`, derived from the
+same fact that drives `list_available_metrics`'s Whoop-proprietary caveat, never a second
+hand-maintained list. `caveats` repeats the same three global boundary statements
+`list_available_metrics` carries; `limitations` carries metric-specific facts instead — the
+vendor-computed text verbatim for a Whoop composite, and an explicit "not part of the driver
+tree" statement for a `tracked` metric.
+
+A `key` not present in the registry returns a result-level tool error
+(`isError: true`, an explanatory `content` block naming the invalid key and pointing at
+`list_available_metrics`, and no `structuredContent`) — never a protocol-level JSON-RPC
+error and never an empty or inferred description.
+
+## What this repo is not
 
 No database drivers, no ORM, no SQL, no credentials, no HTTP or SSE transport, no prompts,
 no resources, no writes. The dependency and import guards in

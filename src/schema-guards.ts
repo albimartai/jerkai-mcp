@@ -8,8 +8,14 @@
  * to expect.
  *
  * Protocol envelope keys (`content`, `isError`, `type`, `text`,
- * `structuredContent`) are deliberately absent from the whitelist. Pass the
- * domain payload, not the MCP response.
+ * `structuredContent`) are deliberately absent from both whitelists below.
+ * Pass the domain payload, not the MCP response.
+ *
+ * There are two whitelists, one per tool, rather than one flat set (PRD
+ * §4/§5.6): a single shared set would let a payload that mixed
+ * `list_available_metrics` fields with `describe_metric` fields pass, which
+ * is a weaker guarantee than NFR-D intends. Nothing here ties a key to a
+ * tool implicitly — the caller names which whitelist a payload must satisfy.
  */
 export const DOMAIN_KEY_WHITELIST = [
   "metrics",
@@ -26,6 +32,19 @@ export const DOMAIN_KEY_WHITELIST = [
 
 export type DomainKey = (typeof DOMAIN_KEY_WHITELIST)[number];
 
+/** `describe_metric`'s own whitelist — deliberately separate from the above. */
+export const DESCRIBE_METRIC_KEY_WHITELIST = [
+  "source",
+  "metric",
+  "role",
+  "measurement",
+  "description",
+  "limitations",
+  "caveats",
+] as const;
+
+export type DescribeMetricDomainKey = (typeof DESCRIBE_METRIC_KEY_WHITELIST)[number];
+
 export class DomainKeyViolationError extends Error {
   constructor(message: string) {
     super(message);
@@ -33,10 +52,12 @@ export class DomainKeyViolationError extends Error {
   }
 }
 
-const WHITELIST = new Set<string>(DOMAIN_KEY_WHITELIST);
-
 /**
- * Walks `payload` and throws unless every visited object key is whitelisted.
+ * Walks `payload` and throws unless every visited object key is on
+ * `whitelist`. Defaults to `DOMAIN_KEY_WHITELIST` (`list_available_metrics`'s
+ * payload shape) so every pre-existing single-argument call keeps its
+ * current meaning; pass `DESCRIBE_METRIC_KEY_WHITELIST` for that tool's
+ * payload instead.
  *
  * Throws if the walk visits zero keys: a validator that silently passes because
  * it never looked at anything is worse than no validator, since it reads as a
@@ -44,7 +65,11 @@ const WHITELIST = new Set<string>(DOMAIN_KEY_WHITELIST);
  *
  * @returns the number of keys visited, for callers that want to assert on it.
  */
-export function assertDomainKeys(payload: unknown): number {
+export function assertDomainKeys(
+  payload: unknown,
+  whitelist: readonly string[] = DOMAIN_KEY_WHITELIST,
+): number {
+  const allowed = new Set<string>(whitelist);
   let visited = 0;
 
   const walk = (node: unknown, path: string): void => {
@@ -56,10 +81,10 @@ export function assertDomainKeys(payload: unknown): number {
 
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       visited += 1;
-      if (!WHITELIST.has(key)) {
+      if (!allowed.has(key)) {
         throw new DomainKeyViolationError(
           `Unwhitelisted key "${key}" at ${path === "" ? "<root>" : path}. ` +
-            `Allowed keys: ${DOMAIN_KEY_WHITELIST.join(", ")}.`,
+            `Allowed keys: ${whitelist.join(", ")}.`,
         );
       }
       walk(value, path === "" ? key : `${path}.${key}`);

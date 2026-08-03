@@ -15,16 +15,19 @@ export type CaveatMetricInput = {
 /**
  * Vendor-computed scores that are not directly measured quantities. A model
  * comparing these across people or against a raw sensor reading needs to know
- * they are a proprietary composite, not a unit-bearing measurement.
+ * they are a proprietary composite, not a unit-bearing measurement. This is
+ * the single source of truth for "which metrics are vendor-computed" (NFR-E):
+ * `describe_metric` derives its `measurement` field from this map rather than
+ * hand-maintaining a second list.
  */
-const WHOOP_PROPRIETARY_SCORES: Record<string, string> = {
+export const WHOOP_PROPRIETARY_SCORES: Record<string, string> = {
   recovery_score:
     "recovery_score is Whoop's proprietary Recovery Score, a vendor-computed composite rather than a directly measured quantity. Its inputs and scale are Whoop's own and are not reproducible from the other metrics here.",
   day_strain:
     "day_strain is Whoop's proprietary Cycle Strain score on a fixed 0 to 21 scale, a vendor-computed composite rather than a measured quantity.",
 };
 
-const WHOOP_SOURCE = "whoop";
+export const WHOOP_SOURCE = "whoop";
 
 export const COVERAGE_CAVEAT =
   "This server reports which metrics exist, not their coverage: unit, earliest day, latest day, day count and gap days are not yet reported by this server and come back as null.";
