@@ -2,6 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import {
+  TOOL_NAME as DESCRIBE_METRIC_TOOL_NAME,
+  handleDescribeMetric,
+  toolConfig as describeMetricToolConfig,
+} from "./tools/describe-metric.js";
+import {
   TOOL_NAME,
   handleListAvailableMetrics,
   toolConfig,
@@ -20,6 +25,12 @@ export function createServer(): McpServer {
   });
 
   server.registerTool(TOOL_NAME, toolConfig, () => handleListAvailableMetrics({}));
+  // Threads the client's actual arguments through — unlike the zero-arg
+  // handler above, describe_metric takes a `key` and silently hardcoding
+  // `{}` here would break every call (PRD §4, the src/server.ts trap).
+  server.registerTool(DESCRIBE_METRIC_TOOL_NAME, describeMetricToolConfig, (args) =>
+    handleDescribeMetric(args),
+  );
 
   return server;
 }

@@ -30,9 +30,20 @@ Around it:
   Not workout-log tonnage, which is permanently not a dashboard metric.
 - **Recovery Score** — *guardrail* — Whoop's own proprietary composite.
 - **Lean body mass** — *guardrail* — from Fitdays via Apple Health.
+- **HRV** — *guardrail* — from the Whoop API.
+- **RHR** — *guardrail* — from the Whoop API.
 
-The metric axes this server names are the same `(source, metric)` pairs the dashboard
-renders, read from the vendored registry rather than restated. See `src/config.ts`.
+Two more axes are ingested and shown but sit deliberately outside this tree — the fourth
+role, **tracked**, for a metric that has no north-star, driver or guardrail place in the
+tree above:
+
+- **Weight** — *tracked* — from Fitdays via Apple Health. Shown on the main-stack strip.
+- **Sleep duration** — *tracked* — from the Whoop API.
+
+That is all 8 registry keys named. The metric axes this server names are the same
+`(source, metric)` pairs the dashboard renders, read from the vendored registry rather than
+restated (see `src/config.ts`); the role each one carries above is queryable per key through
+the `describe_metric` tool.
 
 ## The raw-data-preserved principle
 
@@ -48,12 +59,14 @@ registry as the dashboard. It is a third product surface, built and shipped inde
 of the app: it lets an MCP-connected chat client ask about JerkAI's data. It holds no
 credential, opens no database connection, and has no network transport.
 
-The shipped slice (2026-07-29) answers exactly one question, through one tool,
-`list_available_metrics`: **which biometric axes are queryable, and from which source
-system.** Everything about coverage — unit, date range, day counts, gaps — comes back
-`null`, because this server has no data access at all. The shape is final; the data is not
-wired up. Slice 1's spec is `docs/prd/mcp-server-foundations-metric-registry.md`; the
-response contract itself is in README.
+Two tools are shipped so far. **`list_available_metrics`** (2026-07-29) answers **which
+biometric axes are queryable, and from which source system.** **`describe_metric`**
+(2026-08-03) answers a different question per axis: **where it sits in the driver tree
+above, and whether it is a directly measured quantity or a vendor-computed composite.**
+Everything about coverage — unit, date range, day counts, gaps — still comes back `null`
+from either tool, because this server has no data access at all. The shape is final; the
+data is not wired up. Slice 1's spec is `docs/prd/mcp-server-foundations-metric-registry.md`.
+The response contracts themselves are in README.
 
 ## The two boundaries the tool description must carry
 

@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import { DOMAIN_KEY_WHITELIST, DomainKeyViolationError, assertDomainKeys } from "../../src/schema-guards.js";
+import {
+  DESCRIBE_METRIC_KEY_WHITELIST,
+  DOMAIN_KEY_WHITELIST,
+  DomainKeyViolationError,
+  assertDomainKeys,
+} from "../../src/schema-guards.js";
+import { buildResult as buildDescribeMetricResult } from "../../src/tools/describe-metric.js";
 import {
   InputSchema,
   MetricEntrySchema,
@@ -266,5 +272,64 @@ describe("AC-MF8: strict domain payload key whitelisting", () => {
     expect(() => assertDomainKeys({ content: [], structuredContent: {} })).toThrow(
       DomainKeyViolationError,
     );
+  });
+});
+
+// AC-DM11 (docs/prd/metric-semantics-describe-metric.md). Design assumption
+// this stub commits to (PRD §4/§5.6 names the whitelist mechanism as an
+// unresolved implementation-shape choice): `assertDomainKeys` gains an
+// optional second parameter, the whitelist to check against, defaulting to
+// `DOMAIN_KEY_WHITELIST` so every existing single-argument call above keeps
+// its current meaning unchanged. `DESCRIBE_METRIC_KEY_WHITELIST` is a new,
+// separate export — "a second whitelist/walker pair", the PRD's other named
+// option — so `describe_metric`'s payload is never checked against
+// `list_available_metrics`'s whitelist or vice versa.
+describe("AC-DM11: strict domain payload key whitelisting for describe_metric", () => {
+  it("accepts a real describe_metric payload against its own whitelist, and visits keys while doing so", () => {
+    const visited = assertDomainKeys(buildDescribeMetricResult("bodyFatPct"), DESCRIBE_METRIC_KEY_WHITELIST);
+    expect(visited).toBeGreaterThan(0);
+  });
+
+  it("only ever visits keys on describe_metric's own whitelist", () => {
+    const seen = new Set<string>();
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(collect);
+      if (typeof node !== "object" || node === null) return;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        seen.add(key);
+        collect(value);
+      }
+    };
+    collect(buildDescribeMetricResult("bodyFatPct"));
+
+    expect(seen.size).toBeGreaterThan(0);
+    for (const key of seen) {
+      expect(DESCRIBE_METRIC_KEY_WHITELIST).toContain(key);
+    }
+  });
+
+  it("throws when an unwhitelisted property is injected into a describe_metric payload", () => {
+    const payload = { ...buildDescribeMetricResult("bodyFatPct"), smuggled: true };
+    expect(() => assertDomainKeys(payload, DESCRIBE_METRIC_KEY_WHITELIST)).toThrow(
+      DomainKeyViolationError,
+    );
+  });
+
+  it("keeps the two whitelists disjoint enough that list_available_metrics' own keys fail describe_metric's whitelist", () => {
+    expect(() => assertDomainKeys(buildResult(), DESCRIBE_METRIC_KEY_WHITELIST)).toThrow(
+      DomainKeyViolationError,
+    );
+  });
+
+  it("does not silently accept a payload mixing both tools' keys, against either tool's own whitelist (closes the §5.6 landmine)", () => {
+    const mixed = { ...buildResult(), ...buildDescribeMetricResult("bodyFatPct") };
+    expect(() => assertDomainKeys(mixed, DOMAIN_KEY_WHITELIST)).toThrow(DomainKeyViolationError);
+    expect(() => assertDomainKeys(mixed, DESCRIBE_METRIC_KEY_WHITELIST)).toThrow(
+      DomainKeyViolationError,
+    );
+  });
+
+  it("existing list_available_metrics calls keep working with no whitelist argument (backward compatible default)", () => {
+    expect(() => assertDomainKeys(buildResult())).not.toThrow();
   });
 });

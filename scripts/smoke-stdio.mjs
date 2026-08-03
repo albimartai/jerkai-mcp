@@ -104,20 +104,37 @@ try {
   console.error("smoke: tools/list");
   const list = await request(2, "tools/list");
   const tools = list.result?.tools ?? [];
-  check("exactly one tool advertised", tools.length === 1, `got ${tools.length}`);
-  check("tool is list_available_metrics", tools[0]?.name === "list_available_metrics");
+  // AC-DM1: both tools registered, describe_metric included.
+  check("exactly two tools advertised", tools.length === 2, `got ${tools.length}`);
+  const listAvailableMetricsTool = tools.find((tool) => tool?.name === "list_available_metrics");
+  const describeMetricTool = tools.find((tool) => tool?.name === "describe_metric");
+  check("tool list_available_metrics is advertised", Boolean(listAvailableMetricsTool));
+  check("tool describe_metric is advertised (AC-DM1)", Boolean(describeMetricTool));
   check(
     "description names the nutrition boundary",
-    (tools[0]?.description ?? "").includes("no nutrition or energy-balance data"),
+    (listAvailableMetricsTool?.description ?? "").includes("no nutrition or energy-balance data"),
   );
   check(
     "description names the causal boundary",
-    (tools[0]?.description ?? "").includes("states no cause"),
+    (listAvailableMetricsTool?.description ?? "").includes("states no cause"),
   );
   check(
     "input schema is closed",
-    tools[0]?.inputSchema?.additionalProperties === false,
-    JSON.stringify(tools[0]?.inputSchema),
+    listAvailableMetricsTool?.inputSchema?.additionalProperties === false,
+    JSON.stringify(listAvailableMetricsTool?.inputSchema),
+  );
+  check(
+    "describe_metric description names the nutrition boundary (AC-DM7)",
+    (describeMetricTool?.description ?? "").includes("no nutrition or energy-balance data"),
+  );
+  check(
+    "describe_metric description names the causal boundary (AC-DM7)",
+    (describeMetricTool?.description ?? "").includes("states no cause"),
+  );
+  check(
+    "describe_metric input schema is closed",
+    describeMetricTool?.inputSchema?.additionalProperties === false,
+    JSON.stringify(describeMetricTool?.inputSchema),
   );
 
   console.error("smoke: tools/call");
@@ -150,6 +167,61 @@ try {
     "unexpected arguments are rejected",
     Boolean(bad.error) || bad.result?.isError === true,
     JSON.stringify(bad),
+  );
+
+  console.error("smoke: describe_metric with a real argument (AC-DM1)");
+  const describeKnown = await request(5, "tools/call", {
+    name: "describe_metric",
+    arguments: { key: "bodyFatPct" },
+  });
+  const describeKnownStructured = describeKnown.result?.structuredContent;
+  check(
+    "describe_metric call is not an error",
+    describeKnown.result?.isError !== true,
+    JSON.stringify(describeKnown.result),
+  );
+  check(
+    "structuredContent.source matches bodyFatPct's actual pair (argument threading, AC-DM1)",
+    describeKnownStructured?.source === "fitdays",
+    JSON.stringify(describeKnownStructured),
+  );
+  check(
+    "structuredContent.metric matches bodyFatPct's actual pair (argument threading, AC-DM1)",
+    describeKnownStructured?.metric === "body_fat_pct",
+    JSON.stringify(describeKnownStructured),
+  );
+  check(
+    "structuredContent.role is north_star for bodyFatPct",
+    describeKnownStructured?.role === "north_star",
+    JSON.stringify(describeKnownStructured),
+  );
+
+  console.error("smoke: describe_metric with an unknown key (AC-DM6)");
+  const describeUnknown = await request(6, "tools/call", {
+    name: "describe_metric",
+    arguments: { key: "not_a_real_key" },
+  });
+  check(
+    "unknown key is a result-level error, not a protocol-level one",
+    describeUnknown.result?.isError === true && !describeUnknown.error,
+    JSON.stringify(describeUnknown),
+  );
+  check(
+    "unknown-key error has no structuredContent",
+    describeUnknown.result?.structuredContent === undefined,
+    JSON.stringify(describeUnknown.result),
+  );
+  check(
+    "unknown-key error content names the literal key and list_available_metrics",
+    (describeUnknown.result?.content ?? [])
+      .map((block) => block.text ?? "")
+      .join("\n")
+      .includes("not_a_real_key") &&
+      (describeUnknown.result?.content ?? [])
+        .map((block) => block.text ?? "")
+        .join("\n")
+        .includes("list_available_metrics"),
+    JSON.stringify(describeUnknown.result),
   );
 
   check("no trailing fragment left on stdout", stdoutBuffer.trim() === "", stdoutBuffer);
