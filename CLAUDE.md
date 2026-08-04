@@ -7,10 +7,10 @@ Durable, every-session context only.
 
 Build PRDs are NOT imported here once their slice has shipped. A Build PRD is imported
 while its slice is being built, and the shipping PR removes that import in the same PR
-(DL-2026-07-26-b). The snapshot at docs/prd/mcp-server-foundations-metric-registry.md
-describes slice 1, which shipped 2026-07-29, so it stays readable on demand and is not
-loaded automatically — importing shipped requirements as live context wastes budget and
-blurs what is still in force.
+(DL-2026-07-26-b). The snapshots at docs/prd/mcp-server-foundations-metric-registry.md
+(slice 1, shipped 2026-07-29) and docs/prd/metric-semantics-describe-metric.md (slice 2,
+shipped 2026-08-03) stay readable on demand and are not loaded automatically — importing
+shipped requirements as live context wastes budget and blurs what is still in force.
 
 The next slice's session adds its own PRD import here, and drops it again on merge.
 
