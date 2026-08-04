@@ -10,7 +10,7 @@
 > mapping rather than guess at it. Where an item is inapplicable only because a later slice
 > has not landed, it says *not yet* and names what re-arms it.
 >
-> **Last updated:** 2026-07-31 (derived from the parent's 2026-07-26 revision).
+> **Last updated:** 2026-08-03 (adds the repo-PRD-snapshot item).
 
 ---
 
@@ -103,6 +103,7 @@ A slice is ready to enter development when all of these are true:
 | Shared date key | **NOT APPLICABLE (not yet)** | No dated data passes through this server: every coverage field is `null`. Re-armed by the first slice that reports a date range or day count, which must normalize to the device-local calendar day exactly as jerkai does. |
 | Raw-data-preserved | **ADAPTED** | Nothing is stored here, so the storage half does not apply. The reporting half does, and is sharper: **never report a derived or assumed value as if it were measured, and prefer an explicit null over a plausible guess.** That is why `dayCount` is `null` and never `0` — a zero would assert "we looked and found nothing", and this server never looked. |
 | Secret hygiene intact | **CARRIED** | No secrets committed; the gitleaks `pre-commit` hook (`.husky/pre-commit`, needs `gitleaks` on PATH) and GitHub secret scanning stay working. `.gitleaks.toml` adds a Postgres/Neon connection-string rule, which is the credential this repo must never acquire by accident. |
+| Repo PRD snapshot landed | **CARRIED** | Unchanged. Same mechanism in both repos — the PRD's repo-side copy is written to `docs/prd/[kebab].md` in the same PR that ships the slice, before the `CLAUDE.md` import is dropped. This repo's own PR #5 (slice 2) shipped without it, which is why the item exists. |
 | Merged via PR, DoD checklist completed | **CARRIED** | Unchanged. Never direct to `main`. |
 | PRD import dropped from `CLAUDE.md` in the same PR | **CARRIED** | Unchanged (DL-2026-07-26-b). A Build PRD is imported into `CLAUDE.md` only while its slice is being built; the shipping PR removes that import. The PRD file stays at `docs/prd/` and stays readable on demand — this drops automatic loading, not availability. `CLAUDE.md` imports durable, every-session context only. |
 | Product-truth reconciliation flagged | **CARRIED** | Unchanged, and it reaches further from here: a material change to product facts surfaced in this repo is flagged in the PR for reconciliation into the vault's Product Brief and Decision Log. A session here flags only; the vault edits are a PM step. When the Brief changes, both repos' `docs/context.md` need re-syncing. |
@@ -127,6 +128,11 @@ its build PRD:
 - [ ] **No credential and no data introduced** without a PRD that scopes it.
 - [ ] **Secret hygiene intact** — no secrets committed; gitleaks pre-commit and GitHub
       secret scanning passing.
+- [ ] **Repo PRD snapshot landed.** The PRD's repo-side copy is written to
+      `docs/prd/[kebab].md` in the same PR that ships the slice — the PRD-import-drop
+      item below presupposes this already happened. A PR that drops the `CLAUDE.md`
+      import without ever landing the file leaves `docs/prd/` silently pointing at
+      whichever slice shipped last.
 - [ ] **Merged via PR** (not direct to `main`), with the DoD checklist completed in the PR.
 - [ ] **PRD import dropped from `CLAUDE.md` in the same PR**, for a slice that had one.
 - [ ] **Product-truth reconciliation flagged** in the PR summary for any material change to
