@@ -24,11 +24,74 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Scoped to the unit project only: it must stay DB-free, so
+      # MCP_DATABASE_URL is never exported to this step (PRD "Coverage Values
+      # over Read-Only Postgres" §4 CI wiring).
       - name: Unit tests
-        run: npm test
+        run: npx vitest run --project unit
 
       - name: Build
         run: npm run build
 
+  # Disposable-Neon-branch integration tier (PRD §0 item 6, §4 CI wiring).
+  # Runs after `test` so lint/typecheck/unit failures fail fast without
+  # spending a Neon branch. MCP_DATABASE_URL is exported for this job's own
+  # integration-vitest and smoke steps only.
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checkout jerkai (for its migrations)
+        uses: actions/checkout@v5
+        with:
+          repository: albimartai/jerkai
+          path: jerkai
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Create disposable Neon branch
+        id: neon
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          # The primary checkout has no `path:`, so it lands at the workspace
+          # root; the jerkai checkout above lands at `jerkai` relative to
+          # that same root — not `../jerkai`, which points above the
+          # workspace entirely (falsify pass finding, 2026-08-06, blocking).
+          JERKAI_REPO: jerkai
+        run: |
+          node scripts/ci/neon-branch.mjs create > /tmp/neon-branch.json
+          {
+            echo "connection_string=$(node -p "JSON.parse(require('fs').readFileSync('/tmp/neon-branch.json')).connectionString")"
+            echo "branch_id=$(node -p "JSON.parse(require('fs').readFileSync('/tmp/neon-branch.json')).branchId")"
+          } >> "$GITHUB_OUTPUT"
+
+      # TZ=Europe/Madrid (non-UTC) only for this step: ubuntu-latest defaults
+      # to UTC, under which AC-CV13's day-shift bug cannot manifest even on
+      # an uncast query (FM-03/FM-07's shape — a check that can't discriminate
+      # the failure it exists to catch).
+      - name: Integration tests
+        env:
+          MCP_DATABASE_URL: ${{ steps.neon.outputs.connection_string }}
+          TZ: Europe/Madrid
+        run: npx vitest run --project integration
+
       - name: Stdio smoke test
+        env:
+          MCP_DATABASE_URL: ${{ steps.neon.outputs.connection_string }}
         run: node scripts/smoke-stdio.mjs
+
+      - name: Tear down disposable Neon branch
+        if: always()
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: node scripts/ci/neon-branch.mjs destroy "${{ steps.neon.outputs.branch_id }}"

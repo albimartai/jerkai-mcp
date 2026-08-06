@@ -146,16 +146,36 @@ try {
   check("tool call is not an error", call.result?.isError !== true, JSON.stringify(call.result));
   check("structuredContent carries metrics", Array.isArray(structured?.metrics));
   check("structuredContent carries caveats", (structured?.caveats?.length ?? 0) > 0);
+
+  // AC-CV9 replaces the pre-slice "every coverage field is null" assertion
+  // (PRD "Coverage Values over Read-Only Postgres" §7): coverage is real now.
+  // Per AC-CV9's own Given clause, this runs against a seeded disposable
+  // branch — so the check compares against the exact fixture values
+  // tests/integration/helpers/coverage-fixture.ts seeds, the same fixture
+  // AC-CV1 pins in the integration tier. A bare non-null check would pass
+  // identically on a gapDays off-by-one or a swapped min/max; this catches
+  // it. Requires MCP_DATABASE_URL pointed at that seeded branch — a fresh
+  // recovery_score reading in another database will legitimately fail this.
+  console.error("smoke: AC-CV9 real coverage over the wire");
+  const recoveryScoreEntry = (structured?.metrics ?? []).find(
+    (entry) => entry.source === "whoop" && entry.metric === "recovery_score",
+  );
   check(
-    "every coverage field is null",
-    (structured?.metrics ?? []).every(
-      (entry) =>
-        entry.unit === null &&
-        entry.earliestDay === null &&
-        entry.latestDay === null &&
-        entry.dayCount === null &&
-        entry.gapDays === null,
-    ),
+    "AC-CV9: (whoop, recovery_score) matches the known seeded fixture exactly",
+    recoveryScoreEntry?.dayCount === 4 &&
+      recoveryScoreEntry?.earliestDay === "2026-01-01" &&
+      recoveryScoreEntry?.latestDay === "2026-01-06" &&
+      recoveryScoreEntry?.gapDays === 2 &&
+      recoveryScoreEntry?.unit === "%",
+    JSON.stringify(recoveryScoreEntry),
+  );
+
+  console.error("smoke: AC-CV14b tool description stays honest about coverage over the wire");
+  check(
+    "AC-CV14b: list_available_metrics description omits the stale coverage-unavailable claim",
+    !(listAvailableMetricsTool?.description ?? "").toLowerCase().includes("not available yet") &&
+      !(listAvailableMetricsTool?.description ?? "").toLowerCase().includes("returned as null"),
+    listAvailableMetricsTool?.description,
   );
 
   console.error("smoke: rejecting unexpected arguments");
