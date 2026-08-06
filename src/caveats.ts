@@ -6,10 +6,17 @@
  * tool response so a client that ignores structured output still sees them.
  */
 
-/** The shape `deriveCaveats` needs; the full entry carries more null fields. */
+/**
+ * The shape `deriveCaveats` needs. `unit`/`dayCount` are optional so the
+ * pre-slice call shape (`{ source, metric }` alone, AC-MF6/7a) still type-checks;
+ * when present, they are what lets `deriveCaveats` recognize a unit conflict
+ * without a second, separately-threaded flag (see the function doc below).
+ */
 export type CaveatMetricInput = {
   source: string;
   metric: string;
+  unit?: string | null;
+  dayCount?: number | null;
 };
 
 /**
@@ -29,6 +36,15 @@ export const WHOOP_PROPRIETARY_SCORES: Record<string, string> = {
 
 export const WHOOP_SOURCE = "whoop";
 
+/**
+ * Kept byte-identical: `describe_metric` still carries this verbatim in its
+ * own hardcoded caveats array (src/tools/describe-metric.ts:113), and its own
+ * PRD forbids it from reporting coverage at all. `list_available_metrics`
+ * removes this constant from its own default caveat list below (real
+ * coverage values make the claim false there) without editing the constant
+ * itself — editing it in place would silently falsify describe_metric's
+ * caveat instead.
+ */
 export const COVERAGE_CAVEAT =
   "This server reports which metrics exist, not their coverage: unit, earliest day, latest day, day count and gap days are not yet reported by this server and come back as null.";
 
@@ -41,16 +57,43 @@ export const NO_CAUSE_CAVEAT =
 export const EMPTY_REGISTRY_CAVEAT =
   "No metrics are registered on this server, so the list above is empty. That reflects the server's configuration, not an absence of data upstream.";
 
+/** OQ-2: a coverage-query failure degrades every field to null, plus this. */
+export const COVERAGE_UNAVAILABLE_CAVEAT =
+  "Coverage was unavailable for this call: the underlying data store could not be reached, so every coverage field below is null rather than a guess.";
+
 /**
  * Builds the caveat list for a given metric set. Pure and order-stable: the
  * fixed limitations first, then whatever the metric list itself warrants.
+ *
+ * `options.coverageUnavailable` is OQ-2's signal (a DB-failure call). A
+ * per-metric unit-conflict caveat (OQ-1) is derived from the entries
+ * themselves, not a separately threaded list: an entry with `dayCount > 0`
+ * (real data exists) and `unit === null` can only mean the query found zero
+ * or more than one distinct recorded unit — the exact condition
+ * `deriveCoverage` resolves to `unit: null` in the first place, so no second
+ * flag needs to travel alongside it.
  */
-export function deriveCaveats(metrics: readonly CaveatMetricInput[]): string[] {
-  const caveats: string[] = [COVERAGE_CAVEAT, NO_NUTRITION_CAVEAT, NO_CAUSE_CAVEAT];
+export function deriveCaveats(
+  metrics: readonly CaveatMetricInput[],
+  options: { coverageUnavailable?: boolean } = {},
+): string[] {
+  const caveats: string[] = [NO_NUTRITION_CAVEAT, NO_CAUSE_CAVEAT];
+
+  if (options.coverageUnavailable) {
+    caveats.push(COVERAGE_UNAVAILABLE_CAVEAT);
+  }
 
   if (metrics.length === 0) {
     caveats.push(EMPTY_REGISTRY_CAVEAT);
     return caveats;
+  }
+
+  for (const entry of metrics) {
+    if (entry.dayCount !== undefined && entry.dayCount !== null && entry.dayCount > 0 && entry.unit === null) {
+      caveats.push(
+        `${entry.metric} has an inconsistent recorded unit across its rows (or none at all), so its unit is reported as null rather than guessed.`,
+      );
+    }
   }
 
   for (const [metricName, caveat] of Object.entries(WHOOP_PROPRIETARY_SCORES)) {

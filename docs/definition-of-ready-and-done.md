@@ -53,20 +53,25 @@ A slice is ready to enter development when all of these are true:
       calling the handler directly does not satisfy it. TDD expected: derive tests from
       the ACs. A slice that first introduces a new harness lands that setup as a separate
       self-contained commit ahead of feature work.
-- [ ] **Credential and data exposure considered.** This repo holds no credential and no
-      data today, and that is the design of slice 1, not an accident of it. A slice that
-      introduces either — a database connection, an API token, a real reading served over
-      the protocol — is a scope change requiring its own PRD, and inherits JerkAI's rule
-      that no real biometric data is ever reachable from a public surface.
+- [ ] **Credential and data exposure considered.** A slice that introduces a new
+      credential or a new class of data access — a second database connection, an API
+      token, a raw reading served over the protocol — is a scope change requiring its own
+      PRD, and inherits JerkAI's rule that no real biometric data is ever reachable from a
+      public surface. As of "Coverage Values over Read-Only Postgres" (2026-08-06), this
+      repo holds exactly one credential (`MCP_DATABASE_URL`, a read-only Postgres role
+      scoped to `SELECT` on `biometric_readings`) behind one narrowly scoped connection
+      (`src/db.ts`) — see `AGENTS.md` for the constraint this narrowed and why.
 - [ ] **Dependencies / blockers identified** — including which slices, here or in jerkai,
       must ship first.
 - [ ] **Reference artifact linked** — for a protocol surface this is the tool contract: the
       tool name, its input and output schema, and the caveats it must carry. There is no
       wireframe because there is no UI.
 - [ ] **Dev environment plan clear** — Node 18+ per `package.json#engines`, `npm install`
-      (which installs the husky hooks), and `JERKAI_REPO` pointing at a local jerkai
-      checkout if the slice touches the vendored files. No database URL, by design
-      (`.env.example`).
+      (which installs the husky hooks), `JERKAI_REPO` pointing at a local jerkai checkout if
+      the slice touches the vendored files or (as of the coverage slice) needs jerkai's
+      migrations for the integration tier, and `MCP_DATABASE_URL` if the slice touches
+      `list_available_metrics`'s coverage query — all three documented by name and purpose,
+      never by value, in `.env.example`.
 - [ ] **Verification method known for anything CI cannot reach.** CI here runs the build
       and the smoke script, so the protocol path is covered. What CI does not exercise is
       the server registered in a real MCP client: if a slice's behavior depends on how a
@@ -83,11 +88,11 @@ A slice is ready to enter development when all of these are true:
 | Data source & schema impact identified | **ADAPTED** | No `biometric_readings` table and no migrations here. The analogue is which vendored registry entries a slice reads and whether it needs a re-pin. |
 | Relevant NFRs identified | **CARRIED** | Unchanged. |
 | Test approach known (three tiers) | **ADAPTED** | jerkai has node unit, disposable-Neon integration and jsdom interactive. This repo has the Vitest unit suite and the stdio smoke script. Stated as what exists; no tier invented for a harness that does not exist. |
-| Auth/privacy considered | **ADAPTED** | No Auth.js and no data to gate. Restated as credential-and-data exposure: introducing either is a scope change with its own PRD. |
+| Auth/privacy considered | **ADAPTED** | No Auth.js — there is still no login flow, and still no public deployment of this server to gate one behind. Restated as credential-and-data exposure: introducing a *new* credential or data class beyond what a shipped slice already scoped is what needs its own PRD (as "Coverage Values over Read-Only Postgres" was for its one read-only role). |
 | Dependencies / blockers identified | **CARRIED** | Extended only to name cross-repo blockers. |
 | Design / reference artifact linked | **ADAPTED** | No UI. The tool contract — name, schemas, required caveats — is the artifact a build follows. |
 | Dev environment plan clear | **ADAPTED** | Neon dev branch and migration plan replaced by Node version, `npm install`, and `JERKAI_REPO`. The absence of a database URL is itself the plan. |
-| Production migration plan | **NOT APPLICABLE (not yet)** | No database, so no migration. Re-armed by whichever slice first introduces a database connection; that slice inherits the parent item whole. |
+| Production migration plan | **NOT APPLICABLE** | Re-armed by "Coverage Values over Read-Only Postgres" (2026-08-06), which introduced this repo's first database connection — and confirmed still not applicable: that slice reads jerkai's existing `biometric_readings` table as-is, runs no DDL, and owns no migration of its own. Still re-arms for whichever slice next needs one. |
 | Verification method for anything CI cannot reach | **ADAPTED** | Same intent. The uncovered surface here is not host routing or deploy-time config but the server as seen by a real MCP client. |
 
 ### Definition of Done — baseline
@@ -96,12 +101,12 @@ A slice is ready to enter development when all of these are true:
 |---|---|---|
 | All ACs met and covered by tests | **ADAPTED** | Same requirement; the harness list is this repo's two, not jerkai's three. |
 | CI green | **ADAPTED** | `.github/workflows/ci.yml` runs lint → typecheck → unit → build → stdio smoke. No Neon branch, no component tier. `.github/workflows/vendor-drift.yml` runs the drift check separately. |
-| Migrations applied to production | **NOT APPLICABLE (not yet)** | No database and no production deployment. Re-armed by the slice that introduces a database. |
+| Migrations applied to production | **NOT APPLICABLE** | Still no production deployment of this server. "Coverage Values over Read-Only Postgres" (2026-08-06) introduced a database connection but runs no migration of its own — it reads jerkai's existing schema as-is (see the DoR mapping's "Production migration plan" row above). |
 | Production spot-check against the deployed commit | **NOT APPLICABLE** | Nothing is deployed. The server runs locally from `dist/server.js`, spawned by whichever client registers it; there is no live URL to spot-check and no Vercel deployment. |
-| Behind auth | **NOT APPLICABLE (not yet)** | There is no credential, no data and no public surface to gate. Folded into the DoR credential-and-data item above. Re-armed by the slice that first serves real readings. |
+| Behind auth | **NOT APPLICABLE** | Still no public surface to gate — this server runs locally over stdio, registered by hand into an MCP client, never deployed. "Coverage Values over Read-Only Postgres" (2026-08-06) added a credential and real coverage values, but folded that into the DoR credential-and-data item above rather than this item: a login flow gates a *deployment*, and there still isn't one. Re-armed by the slice that first deploys this server somewhere reachable. |
 | Responsive (phone browser) | **NOT APPLICABLE** | No UI of any kind. A stdio JSON-RPC server has no viewport. |
-| Shared date key | **NOT APPLICABLE (not yet)** | No dated data passes through this server: every coverage field is `null`. Re-armed by the first slice that reports a date range or day count, which must normalize to the device-local calendar day exactly as jerkai does. |
-| Raw-data-preserved | **ADAPTED** | Nothing is stored here, so the storage half does not apply. The reporting half does, and is sharper: **never report a derived or assumed value as if it were measured, and prefer an explicit null over a plausible guess.** That is why `dayCount` is `null` and never `0` — a zero would assert "we looked and found nothing", and this server never looked. |
+| Shared date key | **CARRIED** | Re-armed 2026-08-06 by "Coverage Values over Read-Only Postgres," the first slice to report a date range or day count. `earliestDay`/`latestDay` are cast through `to_char(reading_date, 'YYYY-MM-DD')` on the SQL side (`src/db.ts`), matching jerkai's own `lib/dashboard/data.ts` precedent, so no JS-side `Date` parsing — and no process-TZ-dependent day shift — ever happens. |
+| Raw-data-preserved | **ADAPTED** | Nothing is stored here, so the storage half does not apply. The reporting half does, and is sharper: **never report a derived or assumed value as if it were measured, and prefer an explicit null over a plausible guess.** That is why `dayCount: 0` (the coverage query ran and found nothing) and `dayCount: null` (no query ran to completion) are a deliberate, tested distinction rather than interchangeable — see the "Shared date key" row below and `AGENTS.md` § Traps. |
 | Secret hygiene intact | **CARRIED** | No secrets committed; the gitleaks `pre-commit` hook (`.husky/pre-commit`, needs `gitleaks` on PATH) and GitHub secret scanning stay working. `.gitleaks.toml` adds a Postgres/Neon connection-string rule, which is the credential this repo must never acquire by accident. |
 | Repo PRD snapshot landed | **CARRIED** | Unchanged. Same mechanism in both repos — the PRD's repo-side copy is written to `docs/prd/[kebab].md` in the same PR that ships the slice, before the `CLAUDE.md` import is dropped. This repo's own PR #5 (slice 2) shipped without it, which is why the item exists. |
 | Merged via PR, DoD checklist completed | **CARRIED** | Unchanged. Never direct to `main`. |
