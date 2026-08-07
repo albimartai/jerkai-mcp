@@ -296,6 +296,9 @@ session, not carried over from an older doc):
     vendor-drift.yml-style JERKAI_REPO checkout, and tears the branch down after the run  
     regardless of pass/fail. Filename fixed by DL-2026-07-28-b's own Affects line — do not  
     rename.
+- scripts/ci/neon-branch.d.mts (falsify-diff pass, 2026-08-07 — newly added to the file  
+    budget) — hand-written type declarations for neon-branch.mjs's findTargetProject and  
+    verifyTargetProject, consumed by the integration test's dynamic import of the .mjs file.
 - Fixture/seed logic for the integration tests — a small, deterministic set of rows across  
     2–3 metrics with a known, deliberately gapped date range, inserted by the test setup  
     itself. Never real data, never a copy of any production row.
@@ -356,7 +359,9 @@ SELECT and file-scope narrowing alone cannot make it pass an unmodified regex �
 independently of that guard-narrowing  
 work, its seven existing synchronous buildResult() call sites (lines 218, 224, 231, 245, 260,  
 319, 333) must add await/async once buildResult is async** (falsify pass 9, finding 1,  
-blocking; §4's ordered-path note above). `package-lock.json` will mechanically change (new dep + devDep)
+blocking; §4's ordered-path note above). `package-lock.json` will mechanically change (new dep + devDep). eslint.config.mjs  
+(falsify-diff pass, 2026-08-07 — newly added to the file budget): adds fetch: "readonly" to  
+the globals list, needed because scripts/ci/neon-branch.mjs calls the global fetch.
 
 **The SQL/JS boundary** (falsify pass 2, finding B2, blocking — previously unstated, which  
 left AC-CV2a, AC-CV4 and AC-CV5's tier assignments unfalsifiable): src/db.ts returns **raw  
