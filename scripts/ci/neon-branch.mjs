@@ -120,11 +120,18 @@ async function deleteBranch(project, branchId) {
 function applyJerkaiMigrations(connectionString) {
   const jerkaiRepo = process.env.JERKAI_REPO ?? "../jerkai";
   const migrationsDir = `${jerkaiRepo}/migrations`;
+  // `create()`'s own final output is a single JSON line on stdout (the CI step
+  // redirects it straight to a file). node-pg-migrate's own progress output
+  // must never share that stream — `stdio: "inherit"` did, and its "Migrating
+  // files: ..." line landed ahead of the JSON, corrupting the file the next
+  // CI step parses. stderr still inherits, so a real migration failure is
+  // still visible in the CI log; only stdout is captured instead.
   const result = spawnSync("npx", ["node-pg-migrate", "up", "--migrations-dir", migrationsDir], {
     env: { ...process.env, DATABASE_URL: connectionString },
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "inherit"],
   });
   if (result.status !== 0) {
+    if (result.stdout) process.stderr.write(result.stdout);
     throw new Error("Applying jerkai's migrations to the disposable branch failed.");
   }
 }

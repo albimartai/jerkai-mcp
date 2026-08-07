@@ -69,11 +69,18 @@ jobs:
           # workspace entirely (falsify pass finding, 2026-08-06, blocking).
           JERKAI_REPO: jerkai
         run: |
+          set -eo pipefail
           node scripts/ci/neon-branch.mjs create > /tmp/neon-branch.json
-          {
-            echo "connection_string=$(node -p "JSON.parse(require('fs').readFileSync('/tmp/neon-branch.json')).connectionString")"
-            echo "branch_id=$(node -p "JSON.parse(require('fs').readFileSync('/tmp/neon-branch.json')).branchId")"
-          } >> "$GITHUB_OUTPUT"
+          # A `$(...)` failure inside an `echo` argument does not trip `set -e`
+          # (a prior version of this step silently produced empty outputs on
+          # malformed JSON instead of failing the step). Parsing and writing
+          # GITHUB_OUTPUT from one node process means a bad file fails this
+          # step directly, with node's own error on stderr.
+          node -e "
+            const fs = require('node:fs');
+            const data = JSON.parse(fs.readFileSync('/tmp/neon-branch.json', 'utf8'));
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, \`connection_string=\${data.connectionString}\nbranch_id=\${data.branchId}\n\`);
+          "
 
       # TZ=Europe/Madrid (non-UTC) only for this step: ubuntu-latest defaults
       # to UTC, under which AC-CV13's day-shift bug cannot manifest even on
