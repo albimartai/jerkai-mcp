@@ -22,9 +22,13 @@ import {
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const srcDir = join(repoRoot, "src");
 
+// Narrowed 2026-08-05 (PRD "Coverage Values over Read-Only Postgres", AC-CV12a):
+// @neondatabase/serverless is this slice's one admitted dependency, scoped to
+// src/db.ts alone. AC-CV12's own test (tests/unit/coverage.test.ts) re-exercises
+// that narrower claim directly; this denylist stays the guard against every
+// *other* driver/ORM, admitting no wider a hole than the PRD's own §0 item 5.
 const DB_PACKAGES = [
   "pg",
-  "@neondatabase/serverless",
   "drizzle-orm",
   "prisma",
   "@prisma/client",
@@ -182,8 +186,13 @@ describe("DoD 5: no hardcoded unit values or SQL under src/", () => {
     expect(offences).toEqual([]);
   });
 
-  it("has no SQL query strings", () => {
-    const sql = /\b(select\s+.+\s+from|insert\s+into|update\s+\w+\s+set|delete\s+from)\b/i;
+  // Narrowed 2026-08-05 (AC-CV12b): select...from dropped from the banned set
+  // since this slice's own coverage query in src/db.ts is itself a SELECT.
+  // The write-keyword ban for src/db.ts specifically remains AC-CV6's own,
+  // separately-defined regex (tests/unit/coverage.test.ts), which never
+  // banned SELECT to begin with.
+  it("has no SQL write-statement strings", () => {
+    const sql = /\b(insert\s+into|update\s+\w+\s+set|delete\s+from)\b/i;
     const offences = ALL_SRC_FILES.filter((path) => sql.test(readFileSync(path, "utf8"))).map(rel);
     expect(offences).toEqual([]);
   });
@@ -214,25 +223,29 @@ describe("AC-MF1c-2: closed output schema, root and items", () => {
     expect(OutputSchema.safeParse({ metrics: [], caveats: [], extra: 1 }).success).toBe(false);
   });
 
-  it("rejects an extra metric-entry property", () => {
-    const [entry] = buildResult().metrics;
+  it("rejects an extra metric-entry property", async () => {
+    const [entry] = (await buildResult()).metrics;
     expect(MetricEntrySchema.safeParse(entry).success).toBe(true);
     expect(MetricEntrySchema.safeParse({ ...entry, extra: 1 }).success).toBe(false);
   });
 
-  it("rejects a non-null coverage field", () => {
-    const [entry] = buildResult().metrics;
-    expect(MetricEntrySchema.safeParse({ ...entry, dayCount: 0 }).success).toBe(false);
+  // Was "rejects a non-null coverage field" pre-slice, when dayCount was a
+  // literal z.null(). AC-CV8 makes dayCount: 0 a real, honest value now
+  // (§5.2) — the schema stays bounded in a different way instead: negative
+  // and non-integer day counts are still rejected.
+  it("still rejects an out-of-bounds coverage field (negative dayCount)", async () => {
+    const [entry] = (await buildResult()).metrics;
+    expect(MetricEntrySchema.safeParse({ ...entry, dayCount: -1 }).success).toBe(false);
   });
 });
 
 describe("AC-MF8: strict domain payload key whitelisting", () => {
-  it("accepts the real payload and visits keys while doing so", () => {
-    const visited = assertDomainKeys(buildResult());
+  it("accepts the real payload and visits keys while doing so", async () => {
+    const visited = assertDomainKeys(await buildResult());
     expect(visited).toBeGreaterThan(0);
   });
 
-  it("only ever visits whitelisted keys", () => {
+  it("only ever visits whitelisted keys", async () => {
     const seen = new Set<string>();
     const collect = (node: unknown): void => {
       if (Array.isArray(node)) return node.forEach(collect);
@@ -242,7 +255,7 @@ describe("AC-MF8: strict domain payload key whitelisting", () => {
         collect(value);
       }
     };
-    collect(buildResult());
+    collect(await buildResult());
 
     expect(seen.size).toBeGreaterThan(0);
     for (const key of seen) {
@@ -256,8 +269,8 @@ describe("AC-MF8: strict domain payload key whitelisting", () => {
     );
   });
 
-  it("throws on an unwhitelisted nested property", () => {
-    const payload = buildResult() as unknown as { metrics: Record<string, unknown>[] };
+  it("throws on an unwhitelisted nested property", async () => {
+    const payload = (await buildResult()) as unknown as { metrics: Record<string, unknown>[] };
     payload.metrics[0]!.smuggled = true;
     expect(() => assertDomainKeys(payload)).toThrow(DomainKeyViolationError);
   });
@@ -315,21 +328,23 @@ describe("AC-DM11: strict domain payload key whitelisting for describe_metric", 
     );
   });
 
-  it("keeps the two whitelists disjoint enough that list_available_metrics' own keys fail describe_metric's whitelist", () => {
-    expect(() => assertDomainKeys(buildResult(), DESCRIBE_METRIC_KEY_WHITELIST)).toThrow(
+  it("keeps the two whitelists disjoint enough that list_available_metrics' own keys fail describe_metric's whitelist", async () => {
+    const payload = await buildResult();
+    expect(() => assertDomainKeys(payload, DESCRIBE_METRIC_KEY_WHITELIST)).toThrow(
       DomainKeyViolationError,
     );
   });
 
-  it("does not silently accept a payload mixing both tools' keys, against either tool's own whitelist (closes the §5.6 landmine)", () => {
-    const mixed = { ...buildResult(), ...buildDescribeMetricResult("bodyFatPct") };
+  it("does not silently accept a payload mixing both tools' keys, against either tool's own whitelist (closes the §5.6 landmine)", async () => {
+    const mixed = { ...(await buildResult()), ...buildDescribeMetricResult("bodyFatPct") };
     expect(() => assertDomainKeys(mixed, DOMAIN_KEY_WHITELIST)).toThrow(DomainKeyViolationError);
     expect(() => assertDomainKeys(mixed, DESCRIBE_METRIC_KEY_WHITELIST)).toThrow(
       DomainKeyViolationError,
     );
   });
 
-  it("existing list_available_metrics calls keep working with no whitelist argument (backward compatible default)", () => {
-    expect(() => assertDomainKeys(buildResult())).not.toThrow();
+  it("existing list_available_metrics calls keep working with no whitelist argument (backward compatible default)", async () => {
+    const payload = await buildResult();
+    expect(() => assertDomainKeys(payload)).not.toThrow();
   });
 });

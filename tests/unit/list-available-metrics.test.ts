@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY_REGISTRY_CAVEAT, deriveCaveats } from "../../src/caveats.js";
+import { EMPTY_REGISTRY_CAVEAT, NO_CAUSE_CAVEAT, NO_NUTRITION_CAVEAT, deriveCaveats } from "../../src/caveats.js";
 import { DASHBOARD_METRICS, buildMetricRegistry } from "../../src/config.js";
 import {
   InputSchema,
@@ -37,27 +37,30 @@ describe("AC-MF1c-3: input rejection", () => {
     expect(() => InputSchema.parse({})).not.toThrow();
   });
 
-  it("rejects unexpected arguments", () => {
+  it("rejects unexpected arguments", async () => {
     expect(() => InputSchema.parse({ unexpected: true })).toThrow();
-    expect(() => handleListAvailableMetrics({ unexpected: true })).toThrow();
+    await expect(handleListAvailableMetrics({ unexpected: true })).rejects.toThrow();
   });
 });
 
 describe("AC-MF4: metric entry properties and null guarantees", () => {
-  const { metrics } = buildResult();
-
-  it("returns one entry per registry metric", () => {
+  // No MCP_DATABASE_URL in the unit tier (OQ-2/§3's failure mode): the
+  // coverage query degrades every field to null, exactly as it did pre-slice.
+  it("returns one entry per registry metric", async () => {
+    const { metrics } = await buildResult();
     expect(metrics).toHaveLength(Object.keys(DASHBOARD_METRICS).length);
     expect(metrics.length).toBeGreaterThan(0);
   });
 
-  it("gives every entry exactly the eight specified keys", () => {
+  it("gives every entry exactly the eight specified keys", async () => {
+    const { metrics } = await buildResult();
     for (const entry of metrics) {
       expect(Object.keys(entry).sort()).toEqual([...ENTRY_KEYS].sort());
     }
   });
 
-  it("populates key, source and metric from the vendor registry", () => {
+  it("populates key, source and metric from the vendor registry", async () => {
+    const { metrics } = await buildResult();
     for (const entry of metrics) {
       const definition = DASHBOARD_METRICS[entry.key];
       expect(definition).toBeDefined();
@@ -66,7 +69,8 @@ describe("AC-MF4: metric entry properties and null guarantees", () => {
     }
   });
 
-  it("leaves every coverage field null, with dayCount null rather than 0", () => {
+  it("leaves every coverage field null without a database to query, with dayCount null rather than 0", async () => {
+    const { metrics } = await buildResult();
     for (const entry of metrics) {
       for (const field of NULL_FIELDS) {
         expect(entry[field]).toBeNull();
@@ -77,13 +81,14 @@ describe("AC-MF4: metric entry properties and null guarantees", () => {
 });
 
 describe("AC-MF5a: dynamic registry derivation", () => {
-  it("returns exactly the registry keys, in registry order", () => {
-    const { metrics } = buildResult();
+  it("returns exactly the registry keys, in registry order", async () => {
+    const { metrics } = await buildResult();
     expect(metrics.map((entry) => entry.key)).toEqual(Object.keys(DASHBOARD_METRICS));
   });
 
-  it("includes the axes the vendored jerkai registry actually defines", () => {
-    const pairs = buildResult().metrics.map((entry) => `${entry.source}/${entry.metric}`);
+  it("includes the axes the vendored jerkai registry actually defines", async () => {
+    const { metrics } = await buildResult();
+    const pairs = metrics.map((entry) => `${entry.source}/${entry.metric}`);
     expect(pairs).toContain("whoop/recovery_score");
     expect(pairs).toContain("whoop/day_strain");
     expect(pairs).toContain("fitdays/body_fat_pct");
@@ -111,9 +116,9 @@ describe("AC-MF5b: fallback key filtering", () => {
     });
   });
 
-  it("keeps the filtered keys out of the tool output", () => {
-    const keys = buildResult(buildMetricRegistry(mockRegistry)).metrics.map((entry) => entry.key);
-    expect(keys).toEqual(["bodyFatPct"]);
+  it("keeps the filtered keys out of the tool output", async () => {
+    const { metrics } = await buildResult(buildMetricRegistry(mockRegistry));
+    expect(metrics.map((entry) => entry.key)).toEqual(["bodyFatPct"]);
   });
 
   it("tolerates a registry that is not an object at all", () => {
@@ -123,8 +128,8 @@ describe("AC-MF5b: fallback key filtering", () => {
 });
 
 describe("AC-MF5c: bare/empty registry fallback", () => {
-  it("returns no metrics and still returns caveats", () => {
-    const result = buildResult(buildMetricRegistry({}));
+  it("returns no metrics and still returns caveats", async () => {
+    const result = await buildResult(buildMetricRegistry({}));
     expect(result.metrics).toEqual([]);
     expect(result.caveats.length).toBeGreaterThan(0);
     expect(result.caveats).toContain(EMPTY_REGISTRY_CAVEAT);
@@ -149,42 +154,56 @@ describe("AC-MF6: caveat derivation keyed on the metric list", () => {
     expect(caveats.some((caveat) => caveat.includes("recovery_score"))).toBe(false);
   });
 
-  it("raises the Whoop caveat off the live registry, which includes recovery_score", () => {
-    expect(buildResult().caveats.some((caveat) => caveat.includes("recovery_score"))).toBe(true);
+  it("raises the Whoop caveat off the live registry, which includes recovery_score", async () => {
+    const { caveats } = await buildResult();
+    expect(caveats.some((caveat) => caveat.includes("recovery_score"))).toBe(true);
   });
 });
 
 describe("AC-MF7a: mandatory caveat strings", () => {
-  const { caveats } = buildResult();
-
-  it("is non-empty", () => {
+  // Rewritten (PRD §4, "not just the stale-caveat assertion"): COVERAGE_CAVEAT
+  // is no longer in this tool's default caveat list (§5.3) — its "not yet
+  // reported by this server" text would now be false. The two boundary
+  // caveats are still unconditional; the DB-failure caveat is what the unit
+  // tier's no-MCP_DATABASE_URL environment actually exercises (OQ-2).
+  it("is non-empty", async () => {
+    const { caveats } = await buildResult();
     expect(caveats.length).toBeGreaterThan(0);
   });
 
-  it.each(["unit", "coverage", "not yet reported by this server"])(
-    "contains a caveat mentioning %s",
-    (needle) => {
-      expect(caveats.some((caveat) => caveat.includes(needle))).toBe(true);
-    },
-  );
+  it("always includes the nutrition and causal boundary caveats verbatim", async () => {
+    const { caveats } = await buildResult();
+    expect(caveats).toContain(NO_NUTRITION_CAVEAT);
+    expect(caveats).toContain(NO_CAUSE_CAVEAT);
+  });
+
+  it("includes a coverage-unavailable caveat when the coverage query cannot run (no MCP_DATABASE_URL in this tier)", async () => {
+    const { caveats } = await buildResult();
+    expect(
+      caveats.some(
+        (caveat) => caveat.toLowerCase().includes("coverage") && caveat.toLowerCase().includes("unavailable"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("AC-MF7b: dual-channel emission parity", () => {
-  const response = handleListAvailableMetrics({});
-
-  it("repeats every structured caveat verbatim in the content text", () => {
+  it("repeats every structured caveat verbatim in the content text", async () => {
+    const response = await handleListAvailableMetrics({});
     const text = response.content.map((block) => block.text).join("\n");
     for (const caveat of response.structuredContent.caveats) {
       expect(text).toContain(caveat);
     }
   });
 
-  it("carries the structured metrics in the content text too", () => {
+  it("carries the structured metrics in the content text too", async () => {
+    const response = await handleListAvailableMetrics({});
     const [metricsBlock] = response.content;
     expect(JSON.parse(metricsBlock?.text ?? "null")).toEqual(response.structuredContent.metrics);
   });
 
-  it("emits only text blocks", () => {
+  it("emits only text blocks", async () => {
+    const response = await handleListAvailableMetrics({});
     expect(response.content.every((block) => block.type === "text")).toBe(true);
   });
 });

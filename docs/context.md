@@ -50,23 +50,32 @@ the `describe_metric` tool.
 Raw values are stored and shown; trends and derivations are computed at read time and
 never overwrite a raw record. Its form here: **never report a derived or assumed value as
 if it were measured, and prefer an explicit null over a plausible guess.** That is exactly
-why `dayCount` comes back `null` and never `0` — see `AGENTS.md` § Traps.
+why `dayCount: 0` (the query ran and found nothing) and `dayCount: null` (no query ran to
+completion) are a deliberate, tested distinction rather than interchangeable — see
+`AGENTS.md` § Traps — and why a metric's `unit` comes back `null` plus a caveat the moment
+its rows disagree on one, rather than a guess at which row to trust.
 
 ## What this repo is
 
-A local, read-only Model Context Protocol server over stdio, sitting on the same metric
-registry as the dashboard. It is a third product surface, built and shipped independently
-of the app: it lets an MCP-connected chat client ask about JerkAI's data. It holds no
-credential, opens no database connection, and has no network transport.
+A local Model Context Protocol server over stdio, sitting on the same metric registry as
+the dashboard. It is a third product surface, built and shipped independently of the app:
+it lets an MCP-connected chat client ask about JerkAI's data. It has no network transport,
+and holds exactly one credential (`MCP_DATABASE_URL`, a read-only Postgres role) behind one
+narrowly scoped database connection (`src/db.ts`) — see AGENTS.md for the constraint this
+narrows and why.
 
 Two tools are shipped so far. **`list_available_metrics`** (2026-07-29) answers **which
-biometric axes are queryable, and from which source system.** **`describe_metric`**
-(2026-08-03) answers a different question per axis: **where it sits in the driver tree
-above, and whether it is a directly measured quantity or a vendor-computed composite.**
-Everything about coverage — unit, date range, day counts, gaps — still comes back `null`
-from either tool, because this server has no data access at all. The shape is final; the
-data is not wired up. Slice 1's spec is `docs/prd/mcp-server-foundations-metric-registry.md`.
-The response contracts themselves are in README.
+biometric axes are queryable, and from which source system** — and, since "Coverage Values
+over Read-Only Postgres" (2026-08-06), **their real coverage**: unit, date range, day count
+and gap days, read from `biometric_readings` over the read-only role above. A coverage-query
+failure degrades every field to `null` rather than erroring the call.
+**`describe_metric`** (2026-08-03) answers a different question per axis: **where it sits in
+the driver tree above, and whether it is a directly measured quantity or a vendor-computed
+composite** — it still opens no database connection and still never reports coverage; its
+own PRD excludes that by name. Slice 1's spec is
+`docs/prd/mcp-server-foundations-metric-registry.md`; the coverage slice's is
+`docs/prd/coverage-values-over-read-only-postgres.md`. The response contracts themselves
+are in README.
 
 ## The two boundaries the tool description must carry
 

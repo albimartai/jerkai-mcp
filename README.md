@@ -4,15 +4,23 @@ A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) ser
 tells a model which JerkAI biometric axes exist, where they come from, and what this
 server cannot answer.
 
-It exposes two tools, `list_available_metrics` and `describe_metric`. Neither touches a
-database, holds credentials, or reports a real reading. Every coverage field comes back
-`null` on purpose: the shape is final, the data is not wired up yet.
+It exposes two tools, `list_available_metrics` and `describe_metric`. `describe_metric`
+touches no database and holds no credential. `list_available_metrics` does now: it opens a
+single read-only Postgres connection (`MCP_DATABASE_URL`, a role scoped to `SELECT` on
+`biometric_readings` alone) to report real coverage — unit, date range, day count and gap
+days — per metric axis. A coverage-query failure degrades every field to `null` rather than
+erroring the call; see [`AGENTS.md`](AGENTS.md) for the narrowed "no database" constraint
+this slice is the named exception to.
 
 ## Quick start
 
 ```bash
 npm install && npm run build && node dist/server.js
 ```
+
+Set `MCP_DATABASE_URL` (see [`.env.example`](.env.example)) for real coverage values from
+`list_available_metrics`; without it, the call still succeeds, with every coverage field
+`null` and a caveat naming coverage as unavailable for that call.
 
 The server speaks JSON-RPC over stdio. `stdout` carries protocol frames and nothing else;
 all diagnostics go to `stderr`.
@@ -44,26 +52,33 @@ returns:
       "key": "recoveryScore",
       "source": "whoop",
       "metric": "recovery_score",
-      "unit": null,
-      "earliestDay": null,
-      "latestDay": null,
-      "dayCount": null,
-      "gapDays": null
+      "unit": "%",
+      "earliestDay": "2021-05-13",
+      "latestDay": "2026-08-06",
+      "dayCount": 1851,
+      "gapDays": 61
     }
   ],
   "caveats": ["..."]
 }
 ```
 
-`dayCount` is `null`, never `0`. A zero would read as "we looked and found nothing"; this
-server never looked.
+Coverage is real: `dayCount`, `earliestDay`, `latestDay` and `gapDays` come from a grouped
+read over `biometric_readings`, scoped to exactly this server's registered metric axes.
+`dayCount` is `0`, never `null`, for a metric with zero ingested rows — a real, honest
+answer, since the query ran and found nothing. `null` means the opposite: the coverage
+query did not run to completion (an unset `MCP_DATABASE_URL`, a connection failure) or, for
+`unit`, that the rows recorded zero or more than one distinct unit — this server never
+guesses a value it cannot vouch for.
 
 The `caveats` array is the point of the tool as much as the metric list is. It always
-states that unit and coverage are not yet reported, that there is no nutrition or
-energy-balance data here, and that co-movement between metrics states no cause. Whoop's
-proprietary composites (`recovery_score`, `day_strain`) get named as such when present.
-Every caveat is emitted twice, once in `structuredContent` and once verbatim in the text
-content blocks, so a client that ignores structured output still sees them.
+states that there is no nutrition or energy-balance data here, and that co-movement between
+metrics states no cause; a per-metric caveat is added if that metric's unit could not be
+resolved, and a single caveat replaces real coverage with `null` everywhere if the coverage
+query itself failed this call. Whoop's proprietary composites (`recovery_score`,
+`day_strain`) get named as such when present. Every caveat is emitted twice, once in
+`structuredContent` and once verbatim in the text content blocks, so a client that ignores
+structured output still sees them.
 
 ### `describe_metric`
 
@@ -101,10 +116,13 @@ error and never an empty or inferred description.
 
 ## What this repo is not
 
-No database drivers, no ORM, no SQL, no credentials, no HTTP or SSE transport, no prompts,
-no resources, no writes. The dependency and import guards in
+One narrow, named exception aside — `@neondatabase/serverless`, scoped to `src/db.ts`
+alone, for `list_available_metrics`'s one read-only coverage query — this repo holds no
+other database driver, no ORM, no ad hoc SQL, no write path, no second credential, no HTTP
+or SSE transport, no prompts, no resources. The dependency and import guards in
 [`tests/unit/schema-guards.test.ts`](tests/unit/schema-guards.test.ts) enforce all of that
-by AST-parsing everything under `src/`, so the boundary fails CI rather than eroding.
+by AST-parsing everything under `src/`, so the boundary fails CI rather than eroding — see
+[`AGENTS.md`](AGENTS.md) for the constraint this narrows and why.
 
 ## Vendored registry
 
@@ -135,10 +153,19 @@ alert on upstream drift.
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | Vitest unit suite, including the dependency/AST/schema guards |
+| `npm test` | Vitest: the unit project (dependency/AST/schema guards, DB-free) and the disposable-Neon-branch integration project |
 | `npm run build` | tsup bundles `src/server.ts` into a single `dist/server.js` |
 | `npm run smoke` | Spawns the built server and drives a real stdio handshake |
 | `npm run vendor:check` | Verifies the vendored files against the locked commit |
 | `npm run lint` / `npm run typecheck` | ESLint / `tsc --noEmit` |
 
-`npm run smoke` needs `npm run build` first.
+`npm run smoke` needs `npm run build` first. Both the integration project and the smoke
+script require `MCP_DATABASE_URL` pointed at a database seeded with the exact known fixture
+[`tests/integration/helpers/coverage-fixture.ts`](tests/integration/helpers/coverage-fixture.ts)
+writes — not just any database with data in it, since the smoke script checks
+`(whoop, recovery_score)`'s coverage fields against that fixture's exact values, not merely
+that they're non-null. Without a correctly seeded branch, both fail loudly rather than skip.
+CI provisions a disposable `jerkai-mcp-ci` branch per run via
+[`scripts/ci/neon-branch.mjs`](scripts/ci/neon-branch.mjs) rather than touching real data;
+`npm test`'s unit project and `list_available_metrics` itself stay usable with no database
+at all, degrading coverage to `null` rather than failing the call.

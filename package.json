@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.0",
+    "@neondatabase/serverless": "^1.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -28,6 +29,7 @@
     "@types/node": "^22.18.13",
     "eslint": "^9.39.1",
     "husky": "^9.1.7",
+    "node-pg-migrate": "^9.0.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.2",
